@@ -1,10 +1,10 @@
+from flask import Flask, request, jsonify
+from flask_restful import Resource, Api
 import psycopg2
-from psycopg2 import sql
-import sys
 import os
 from dotenv import load_dotenv
+import sys
 
-# Загружаем переменные окружения из файла .env
 load_dotenv()
 
 host = os.getenv('FSTR_DB_HOST')
@@ -13,6 +13,8 @@ user = os.getenv('FSTR_DB_LOGIN')
 password = os.getenv('FSTR_DB_PASS')
 dbname = os.getenv('FSTR_DB_NAME')
 
+app = Flask(__name__)
+api = Api(app)
 
 class DatabaseHandler:
     def __init__(self, host, port, user, password, dbname):
@@ -29,33 +31,56 @@ class DatabaseHandler:
             self.cur = self.conn.cursor()
             print("Connected to PostgreSQL.")
         except Exception as e:
-            print("Error connecting to PostgreSQL:", e)
+            print(f"Error connecting to PostgreSQL: {e}")
             sys.exit(1)
 
     def add_pereval_data(self, beautyTitle, title, other_titles, connect, date_added, user_id, coord_id, level_id):
-        status = 'new'
         try:
-            self.cur.execute("""
-                INSERT INTO pereval_added (beautytitle, title, other_titles, connect, date_added, user_id, coord_id, level_id, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (beautyTitle, title, other_titles, connect, date_added, user_id, coord_id, level_id, status))
+            # SQL запрос для вставки данных
+            insert_query = """INSERT INTO pereval_added (beautyTitle, title, other_titles, connect, date_added, user_id, coord_id, level_id)
+                              VALUES (%s, %s, %s, %s, %s, %s, %s, %s);"""
+            # Данные для вставки
+            record_to_insert = (beautyTitle, title, other_titles, connect, date_added, user_id, coord_id, level_id)
+
+            # Выполнение команды для вставки данных
+            self.cur.execute(insert_query, record_to_insert)
+
+            # Фиксация транзакции
             self.conn.commit()
-            print("Data added successfully.")
-        except psycopg2.IntegrityError as e:
-            if "duplicate key value violates unique constraint" in str(e):
-                print("Error: Duplicate key value.")
-            else:
-                print("Error executing SQL query:", e)
-            sys.exit(1)
+
+            print("Record inserted successfully into pereval table")
+
+        except (Exception, psycopg2.Error) as error:
+            print("Failed to insert record into pereval table", error)
+            self.conn.rollback()  # Откат в случае ошибки
+
+        finally:
+            # Закрываем курсор
+            if self.cur is not None:
+                self.cur.close()
 
     def close_connection(self):
-        self.cur.close()
-        self.conn.close()
+        if self.cur:
+            self.cur.close()
+        if self.conn:
+            self.conn.close()
 
-try:
-    # Пример использования
-    db_handler = DatabaseHandler('localhost', port, user, password, dbname)
-    db_handler.add_pereval_data("Beautiful Title", "Main Title", "Other Titles", "Connection Info", "2022-01-01 12:00:00", 3,3 ,3 )
-    db_handler.close_connection()
-except Exception as e:
-    print("An error occurred:", e)
+class PerevalAdd(Resource):
+    def post(self):
+        try:
+            data = request.json
+            db_handler = DatabaseHandler('localhost', port, user, password, dbname)
+            db_handler.add_pereval_data(
+                data['beautyTitle'], data['title'], data['other_titles'],
+                data['connect'], data['date_added'], data['user_id'],
+                data['coord_id'], data['level_id']
+            )
+            db_handler.close_connection()
+            return {'message': 'Data added successfully.'}, 201
+        except Exception as e:
+            return {'message': f'An error occurred: {str(e)}'}, 500
+
+api.add_resource(PerevalAdd, '/add_pereval')
+
+if __name__ == '__main__':
+    app.run(debug=True)
