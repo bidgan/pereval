@@ -16,6 +16,7 @@ dbname = os.getenv('FSTR_DB_NAME')
 app = Flask(__name__)
 api = Api(app)
 
+
 class DatabaseHandler:
     def __init__(self, host, port, user, password, dbname):
         self.conn = None
@@ -65,6 +66,7 @@ class DatabaseHandler:
         if self.conn:
             self.conn.close()
 
+
 class PerevalAdd(Resource):
     def post(self):
         try:
@@ -80,7 +82,66 @@ class PerevalAdd(Resource):
         except Exception as e:
             return {'message': f'An error occurred: {str(e)}'}, 500
 
+
+class PerevalById(Resource):
+    def get(self, id):
+        try:
+            db_handler = DatabaseHandler(host, port, user, password, dbname)
+            db_handler.init(host, port, user, password, dbname)
+            db_handler.cur.execute("SELECT * FROM pereval_added WHERE id = %s", (id,))
+            result = db_handler.cur.fetchone()
+            db_handler.close_connection()
+            if result:
+                return jsonify(result)
+            else:
+                return {'message': 'Record not found'}, 404
+        except Exception as e:
+            return {'message': str(e)}, 500
+
+
+class PerevalEdit(Resource):
+    def patch(self, id):
+        try:
+            data = request.json
+            db_handler = DatabaseHandler(host, port, user, password, dbname)
+            db_handler.init(host, port, user, password, dbname)
+            db_handler.cur.execute("SELECT status FROM pereval_added WHERE id = %s", (id,))
+            status = db_handler.cur.fetchone()
+            if status[0] != 'new':
+                return {'message': 'Only records with status "new" can be edited'}, 403
+
+            # Создание запроса на обновление, исключая поля ФИО, email и номер телефона
+            fields = [f"{k} = %s" for k in data.keys() if k not in ['fio', 'email', 'phone']]
+            query = "UPDATE pereval_added SET " + ", ".join(fields) + " WHERE id = %s"
+            values = list(data.values()) + [id]
+
+            db_handler.cur.execute(query, values)
+            db_handler.conn.commit()
+            db_handler.close_connection()
+            return {'message': 'Record updated successfully'}, 200
+        except Exception as e:
+            return {'message': str(e)}, 500
+
+class PerevalByUserEmail(Resource):
+    def get(self):
+        email = request.args.get('user__email')
+        try:
+            db_handler = DatabaseHandler(host, port, user, password, dbname)
+            db_handler.init(host, port, user, password, dbname)
+            db_handler.cur.execute("SELECT * FROM pereval_added WHERE user_email = %s", (email,))
+            result = db_handler.cur.fetchall()
+            db_handler.close_connection()
+            return jsonify(result)
+        except Exception as e:
+            return {'message': str(e)}, 500
+
+
+
 api.add_resource(PerevalAdd, '/add_pereval')
+api.add_resource(PerevalById, '/submitData/<int:id>')
+api.add_resource(PerevalEdit, '/submitData/<int:id>')
+api.add_resource(PerevalByUserEmail, '/submitData')
+
 
 if __name__ == '__main__':
     app.run(debug=True)
